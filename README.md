@@ -1,3 +1,39 @@
+# steam-client
+
+Internal fork of [`steam-next`](https://github.com/fabieu/steam-next) with a narrow helper for SteamClient-platform authentication and PICS product info.
+
+## Product info helper
+
+Install from git:
+
+```bash
+pip install "steam-client[client] @ git+ssh://git@gitlab.com/georgycusus/steam-client.git@main"
+```
+
+Usage:
+
+```python
+from steam.product_info import SteamProductInfoClient
+
+client = SteamProductInfoClient(
+    username="account",
+    password="password",
+)
+info = client.get_product_info([730, 1422450])
+```
+
+For services, prefer passing a previously saved refresh token:
+
+```python
+client = SteamProductInfoClient(
+    username="account",
+    refresh_token="steam-client-refresh-token",
+)
+info = client.get_product_info([730])
+```
+
+---
+
 [![PyPI](https://img.shields.io/pypi/v/steam-next)](https://pypi.python.org/pypi/steam-next)
 [![Python Versions](https://img.shields.io/pypi/pyversions/steam-next)](https://pypi.python.org/pypi/steam-next)
 [![License](https://img.shields.io/github/license/fabieu/steam-next)](https://github.com/fabieu/steam-next/blob/master/LICENSE)

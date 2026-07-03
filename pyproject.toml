@@ -1,7 +1,7 @@
 [project]
-name = "steam-next"
-version = "2.2.0"
-description = "Python package for interacting with Steam"
+name = "steam-client"
+version = "0.1.0"
+description = "Python Steam client fork with SteamClient auth and PICS product info helpers"
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -47,7 +47,7 @@ packages = [
 
 [tool.poetry.urls]
 documentation = "https://steam-next.readthedocs.io"
-repository = "https://github.com/fabieu/steam-next"
+repository = "https://gitlab.com/georgycusus/steam-client"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

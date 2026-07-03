@@ -562,6 +562,56 @@ class SteamClient(CMClient, BuiltinBase):
 
         return EResult(resp.body.eresult) if resp else EResult.Fail
 
+    def login_with_refresh_token(self, account_name, refresh_token, login_id=None):
+        """Login with a Steam Client refresh token.
+
+        Steam CM expects this token in ``CMsgClientLogon.access_token``.
+        Use :class:`steam.webauth.WebAuth` with SteamClient platform auth to
+        obtain the token from account credentials.
+        """
+        self._LOG.debug("Attempting refresh token login")
+
+        eresult = self._pre_login()
+
+        if eresult != EResult.OK:
+            return eresult
+
+        self.username = account_name
+
+        message = MsgProto(EMsg.ClientLogon)
+        message.header.steamid = SteamID(type='Individual', universe='Public')
+        message.body.protocol_version = 65580
+        message.body.client_package_version = 1561159470
+        message.body.client_os_type = EOSType.Windows10
+        message.body.client_language = "english"
+        message.body.should_remember_password = True
+        message.body.supports_rate_limit_response = True
+        message.body.chat_mode = self.chat_mode
+
+        if login_id is None:
+            message.body.obfuscated_private_ip.v4 = ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
+        else:
+            message.body.obfuscated_private_ip.v4 = login_id
+
+        message.body.account_name = account_name
+        message.body.access_token = refresh_token
+
+        sentry = self.get_sentry(account_name)
+        if sentry is None:
+            message.body.eresult_sentryfile = EResult.FileNotFound
+        else:
+            message.body.eresult_sentryfile = EResult.OK
+            message.body.sha_sentryfile = sha1_hash(sentry)
+
+        self.send(message)
+
+        resp = self.wait_msg(EMsg.ClientLogOnResponse, timeout=30)
+
+        if resp and resp.body.eresult == EResult.OK:
+            self.sleep(0.5)
+
+        return EResult(resp.body.eresult) if resp else EResult.Fail
+
     def anonymous_login(self):
         """Login as anonymous user
 
@@ -599,7 +649,7 @@ class SteamClient(CMClient, BuiltinBase):
             self.send(MsgProto(EMsg.ClientLogOff))
             try:
                 self.wait_event(self.EVENT_DISCONNECTED, timeout=5, raises=True)
-            except:
+            except Exception:
                 self.disconnect()
             self.idle()
 
@@ -669,10 +719,12 @@ class SteamClient(CMClient, BuiltinBase):
                 if prompt_for_unavailable and result == EResult.ServiceUnavailable:
                     while True:
                         answer = input("Steam is down. Keep retrying? [y/n]: ").lower()
-                        if answer in 'yn': break
+                        if answer in 'yn':
+                            break
 
                     prompt_for_unavailable = False
-                    if answer == 'n': break
+                    if answer == 'n':
+                        break
 
                 self.reconnect(maxdelay=15)  # implements reconnect throttling
 

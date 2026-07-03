@@ -123,7 +123,14 @@ class WebAuth:
 
     """
 
-    def __init__(self, username: str = "", password: str = ""):
+    def __init__(
+            self,
+            username: str = "",
+            password: str = "",
+            platform_type: int = 2,
+            website_id: str = 'Community',
+            device_friendly_name: str = None,
+    ):
         # Pretend to be an actual browser, to (hopefully) avoid breakage in the future
         self.user_agent = (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -139,6 +146,9 @@ class WebAuth:
             'User-Agent': self.user_agent,
         }
         self.session = make_requests_session(headers=headers)
+        self.platform_type = platform_type
+        self.website_id = website_id
+        self.device_friendly_name = device_friendly_name or self.user_agent
 
         self.username = username
         self.password = password
@@ -200,14 +210,14 @@ class WebAuth:
         """Start login session via BeginAuthSessionViaCredentials"""
 
         data = {
-            'device_friendly_name': self.user_agent,
+            'device_friendly_name': self.device_friendly_name,
             'account_name': self.username,
             'encrypted_password': account_encrypted_password,
             'encryption_timestamp': timestamp,
             'remember_login': '1',
-            'platform_type': '2',
+            'platform_type': str(self.platform_type),
             'persistence': '1',
-            'website_id': 'Community',
+            'website_id': self.website_id,
         }
         response_json = self.send_api_request(
             steam_api_interface='IAuthenticationService',
