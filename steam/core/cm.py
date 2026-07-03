@@ -13,7 +13,7 @@ import gevent.socket as socket
 from eventemitter import EventEmitter
 
 from steam.core import crypto
-from steam.core.connection import TCPConnection
+from steam.core.connection import TCPConnection, WebSocketConnection
 from steam.core.msg import Msg, MsgProto
 from steam.enums import EResult, EUniverse
 from steam.enums.emsg import EMsg
@@ -58,6 +58,7 @@ class CMClient(EventEmitter):
 
     PROTOCOL_TCP = 0  #: TCP protocol enum
     PROTOCOL_UDP = 1  #: UDP protocol enum
+    PROTOCOL_WEBSOCKET = 2  #: WebSocket protocol enum
     verbose_debug = False  #: print message connects in debug
 
     auto_discovery = True  #: enables automatic CM discovery
@@ -82,10 +83,14 @@ class CMClient(EventEmitter):
     def __init__(self, protocol=PROTOCOL_TCP):
         self.cm_servers = CMServerList()
 
+        self.protocol = protocol
+
         if protocol == CMClient.PROTOCOL_TCP:
             self.connection = TCPConnection()
+        elif protocol == CMClient.PROTOCOL_WEBSOCKET:
+            self.connection = WebSocketConnection()
         else:
-            raise ValueError("Only TCP is supported")
+            raise ValueError("Only TCP and WebSocket are supported")
 
         self.on(EMsg.ChannelEncryptRequest, self.__handle_encrypt_request),
         self.on(EMsg.Multi, self.__handle_multi),
@@ -131,7 +136,12 @@ class CMClient(EventEmitter):
                 self._connecting = False
                 return False
 
-            if not self.cm_servers.bootstrap_from_webapi():
+            if self.protocol == CMClient.PROTOCOL_WEBSOCKET:
+                bootstrapped = self.cm_servers.bootstrap_from_webapi(websocket=True)
+            else:
+                bootstrapped = self.cm_servers.bootstrap_from_webapi()
+
+            if not bootstrapped and self.protocol != CMClient.PROTOCOL_WEBSOCKET:
                 self.cm_servers.bootstrap_from_dns()
 
         for i, server_addr in enumerate(cycle(self.cm_servers), start=next(i) - 1):
@@ -152,7 +162,11 @@ class CMClient(EventEmitter):
 
         self.current_server_addr = server_addr
         self.connected = True
+        if self.protocol == CMClient.PROTOCOL_WEBSOCKET:
+            self.channel_secured = True
         self.emit(self.EVENT_CONNECTED)
+        if self.protocol == CMClient.PROTOCOL_WEBSOCKET:
+            self.emit(self.EVENT_CHANNEL_SECURED)
         self._recv_loop = gevent.spawn(self._recv_messages)
         self._connecting = False
         return True
@@ -232,8 +246,11 @@ class CMClient(EventEmitter):
                 else:
                     message = crypto.symmetric_decrypt(message, self.channel_key)
 
-            gevent.spawn(self._parse_message, message)
-            self.idle()
+            if self.protocol == CMClient.PROTOCOL_WEBSOCKET:
+                self._parse_message(message)
+            else:
+                gevent.spawn(self._parse_message, message)
+                self.idle()
 
         if not self._seen_logon and self.channel_secured:
             if self.wait_event('disconnected', timeout=5) is not None:
@@ -471,7 +488,7 @@ class CMServerList:
             self._LOG.error("DNS boostrap: cm0.steampowered.com resolved no A records")
             return False
 
-    def bootstrap_from_webapi(self, cell_id=0):
+    def bootstrap_from_webapi(self, cell_id=0, websocket=False):
         """
         Fetches CM server list from WebAPI and replaces the current one
 
@@ -496,16 +513,19 @@ class CMServerList:
             self._LOG.error("GetCMList failed with %s" % repr(result))
             return False
 
-        serverlist = resp['response']['serverlist']
+        serverlist_key = 'serverlist_websockets' if websocket else 'serverlist'
+        serverlist = resp['response'].get(serverlist_key) or []
         self._LOG.debug("Received %d servers from WebAPI" % len(serverlist))
 
-        def str_to_tuple(serveraddr):
+        def normalize_server(serveraddr):
+            if websocket:
+                return serveraddr
             ip, port = serveraddr.split(':')
             return str(ip), int(port)
 
         self.clear()
         self.cell_id = cell_id
-        self.merge_list(map(str_to_tuple, serverlist))
+        self.merge_list(map(normalize_server, serverlist))
 
         return True
 
@@ -564,9 +584,9 @@ class CMServerList:
         """
         total = len(self.list)
 
-        for ip, port in new_list:
-            if (ip, port) not in self.list:
-                self.mark_good((ip, port))
+        for server in new_list:
+            if server not in self.list:
+                self.mark_good(server)
 
         if len(self.list) > total:
             self._LOG.debug("Added %d new CM addresses." % (len(self.list) - total))

@@ -2,6 +2,7 @@ import logging
 import struct
 
 import gevent
+import websocket
 from gevent import event
 from gevent import queue
 from gevent import socket
@@ -87,7 +88,7 @@ class Connection:
             packet = struct.pack(Connection.FMT, len(message), Connection.MAGIC) + message
             try:
                 self._write_data(packet)
-            except:
+            except Exception:
                 logger.debug("Connection error (writer).")
                 self.disconnect()
                 return
@@ -147,6 +148,76 @@ class TCPConnection(Connection):
 
     def _write_data(self, data):
         self.socket.sendall(data)
+
+
+class WebSocketConnection(Connection):
+    def _new_socket(self):
+        self.socket = None
+
+    @property
+    def local_address(self):
+        try:
+            return self.socket.sock.getsockname()[0]
+        except Exception:
+            return '0.0.0.0'
+
+    def _connect(self, server_addr):
+        endpoint = server_addr
+        if isinstance(server_addr, tuple):
+            endpoint = f'{server_addr[0]}:{server_addr[1]}'
+        url = f'wss://{endpoint}/cmsocket/'
+        self.socket = websocket.create_connection(url, timeout=30)
+        self.socket.settimeout(0.5)
+
+    def put_message(self, message):
+        try:
+            self.socket.send_binary(message)
+        except Exception:
+            logger.debug("WebSocket connection error (send).")
+            self.disconnect()
+
+    def _writer_loop_once(self):
+        message = self.send_queue.get()
+        try:
+            self.socket.send_binary(message)
+        except Exception:
+            logger.debug("WebSocket connection error (writer).")
+            self.disconnect()
+
+    def _writer_loop(self):
+        while True:
+            self._writer_loop_once()
+
+    def _reader_loop_once(self):
+        try:
+            message = self.socket.recv()
+        except websocket.WebSocketTimeoutException:
+            gevent.sleep(0.05)
+            return
+        except Exception:
+            logger.debug("WebSocket connection error (reader).")
+            self.disconnect()
+            return
+
+        if not message:
+            logger.debug("WebSocket connection closed by server.")
+            self.disconnect()
+            return
+
+        if isinstance(message, str):
+            return
+
+        self.recv_queue.put(message)
+
+    def _reader_loop(self):
+        while True:
+            self._reader_loop_once()
+
+    def _read_data(self):
+        raise NotImplementedError
+
+    def _write_data(self, data):
+        raise NotImplementedError
 
 
 class UDPConnection(Connection):

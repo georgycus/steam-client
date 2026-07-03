@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from steam.client import SteamClient
+from steam.core.cm import CMClient
 from steam.enums import EResult
 from steam.webauth import WebAuth
 
@@ -18,7 +19,7 @@ class SteamProductInfoClient:
             refresh_token: str = '',
             steam_guard_code: str | None = None,
             timeout: int = 30,
-            steam_client_factory: Callable[[], SteamClient] = SteamClient,
+            steam_client_factory: Callable[[], SteamClient] | None = None,
             web_auth_factory: Callable[..., WebAuth] = WebAuth,
     ):
         self.username = username
@@ -26,8 +27,12 @@ class SteamProductInfoClient:
         self.refresh_token = refresh_token
         self.steam_guard_code = steam_guard_code
         self.timeout = timeout
-        self.steam_client_factory = steam_client_factory
+        self.steam_client_factory = steam_client_factory or self._create_steam_client
         self.web_auth_factory = web_auth_factory
+
+    @staticmethod
+    def _create_steam_client() -> SteamClient:
+        return SteamClient(protocol=CMClient.PROTOCOL_WEBSOCKET)
 
     def get_product_info(self, app_ids: Sequence[int]) -> dict[str, Any]:
         steam_client = self.steam_client_factory()
@@ -43,7 +48,7 @@ class SteamProductInfoClient:
                 timeout=self.timeout,
             )
         finally:
-            steam_client.logout()
+            steam_client.disconnect()
 
     def _get_refresh_token_from_credentials(self) -> str:
         if not self.username or not self.password:

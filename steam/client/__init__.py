@@ -13,6 +13,7 @@ Implementation of Steam client based on ``gevent``
     Optional features are available as :mod:`.mixins`. This allows the client to remain light yet flexible.
 
 """
+import base64
 import json
 import logging
 import os
@@ -50,8 +51,8 @@ class SteamClient(CMClient, BuiltinBase):
     login_key = None  #: can be used for subsequent logins (no 2FA code will be required)
     chat_mode = 2  #: chat mode (0=old chat, 2=new chat)
 
-    def __init__(self):
-        CMClient.__init__(self)
+    def __init__(self, protocol=CMClient.PROTOCOL_TCP):
+        CMClient.__init__(self, protocol=protocol)
 
         # register listeners
         self.on(self.EVENT_DISCONNECTED, self._handle_disconnect)
@@ -577,31 +578,20 @@ class SteamClient(CMClient, BuiltinBase):
             return eresult
 
         self.username = account_name
+        if not self.session_id:
+            self.session_id = int(random() * 0x7fffffff) or 1
 
         message = MsgProto(EMsg.ClientLogon)
-        message.header.steamid = SteamID(type='Individual', universe='Public')
+        message.header.steamid = self._steam_id_from_refresh_token(refresh_token)
         message.body.protocol_version = 65580
-        message.body.client_package_version = 1561159470
         message.body.client_os_type = EOSType.Windows10
         message.body.client_language = "english"
+        message.body.obfuscated_private_ip.v4 = login_id if login_id is not None else 0
+        message.body.access_token = refresh_token
         message.body.should_remember_password = True
         message.body.supports_rate_limit_response = True
         message.body.chat_mode = self.chat_mode
-
-        if login_id is None:
-            message.body.obfuscated_private_ip.v4 = ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
-        else:
-            message.body.obfuscated_private_ip.v4 = login_id
-
-        message.body.account_name = account_name
-        message.body.access_token = refresh_token
-
-        sentry = self.get_sentry(account_name)
-        if sentry is None:
-            message.body.eresult_sentryfile = EResult.FileNotFound
-        else:
-            message.body.eresult_sentryfile = EResult.OK
-            message.body.sha_sentryfile = sha1_hash(sentry)
+        message.body.machine_name = "DESKTOP-%06d" % int(random() * 1000000)
 
         self.send(message)
 
@@ -611,6 +601,16 @@ class SteamClient(CMClient, BuiltinBase):
             self.sleep(0.5)
 
         return EResult(resp.body.eresult) if resp else EResult.Fail
+
+    @staticmethod
+    def _steam_id_from_refresh_token(refresh_token):
+        try:
+            payload = refresh_token.split('.')[1]
+            payload += '=' * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            return int(claims['sub'])
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError('Refresh token does not contain Steam ID') from exc
 
     def anonymous_login(self):
         """Login as anonymous user

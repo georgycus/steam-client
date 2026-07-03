@@ -20,7 +20,7 @@ def test_product_info_client_logs_in_with_refresh_token_and_fetches_product_info
     assert result == {'apps': {730: {'appid': 730}}, 'packages': {}}
     steam_client.login_with_refresh_token.assert_called_once_with('account-name', 'refresh-token-value')
     steam_client.get_product_info.assert_called_once_with(apps=[730], packages=[], timeout=30)
-    steam_client.logout.assert_called_once_with()
+    steam_client.disconnect.assert_called_once_with()
 
 
 def test_product_info_client_gets_refresh_token_from_credentials_when_token_is_not_provided():
